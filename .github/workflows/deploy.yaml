@@ -70,52 +70,63 @@ jobs:
       # ── Step 5 & 6: Create Pull Request targeting main ─────────────────────
       - name: Create Pull Request to main
         id: create_pr
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ env.BRANCH_NAME }}
-          base: main
-          title: "PROD Deploy: ${{ env.BRANCH_NAME }}${{ inputs.ritm_ticket && format(' [{0}]', inputs.ritm_ticket) || '' }}"
-          body: |
-            ## Production Deployment
-
-            | Field            | Value |
-            |---|---|
-            | **Branch**       | `${{ env.BRANCH_NAME }}` |
-            | **Target**       | `main` |
-            | **RITM**         | ${{ inputs.ritm_ticket || 'N/A' }} |
-            | **Triggered by** | @${{ github.actor }} |
-
-            ### Checklist
-            - [ ] Source branch: `${{ env.BRANCH_NAME }}`
-            - [ ] Destination: `main`
-            - [ ] Merge conflicts resolved
-            - [ ] Stakeholders reviewed
-          labels: production, deployment
-          draft: false
-
-      - name: Output PR URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "✅ Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
+          TITLE="PROD Deploy: ${{ env.BRANCH_NAME }}"
+          if [ -n "${{ inputs.ritm_ticket }}" ]; then
+            TITLE="${TITLE} [${{ inputs.ritm_ticket }}]"
+          fi
+
+          BODY="## Production Deployment
+
+          | Field            | Value |
+          |---|---|
+          | **Branch**       | \`${{ env.BRANCH_NAME }}\` |
+          | **Target**       | \`main\` |
+          | **RITM**         | ${{ inputs.ritm_ticket || 'N/A' }} |
+          | **Triggered by** | @${{ github.actor }} |
+
+          ### Checklist
+          - [ ] Source branch: \`${{ env.BRANCH_NAME }}\`
+          - [ ] Destination: \`main\`
+          - [ ] Merge conflicts resolved
+          - [ ] Stakeholders reviewed"
+
+          PR_URL=$(gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "${{ env.BRANCH_NAME }}" \
+            --title "${TITLE}" \
+            --body "${BODY}" \
+            --label "production" \
+            --label "deployment")
+
+          echo "PR_URL=${PR_URL}" >> "$GITHUB_ENV"
+          PR_NUMBER=$(echo "${PR_URL}" | grep -oE '[0-9]+$')
+          echo "PR_NUMBER=${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "✅ Pull Request created: ${PR_URL}"
 
       # ── Step 7: Approval gate via GitHub Environment protection ─────────────
       # Workflow pauses here until a reviewer approves in:
       # Settings → Environments → production → Required reviewers
 
-      # ── Step 8: Merge to main (after approval) ─────────────────────────────
+      # ── Step 8: Merge PR to main ────────────────────────────────────────────
       - name: Merge PR to main
-        uses: peter-evans/enable-pull-request-automerge@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
-          merge-method: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge "${{ env.PR_NUMBER }}" \
+            --repo "${{ github.repository }}" \
+            --merge \
+            --admin
+          echo "✅ PR #${{ env.PR_NUMBER }} merged into main"
 
       # ── Step 9: Tag the build with appropriate version ─────────────────────
       - name: Checkout main and Tag Build
         run: |
           git checkout main
           git pull origin main
-          git status
 
           TAG="${{ inputs.version_tag }}"
           MESSAGE="PROD-Deploy-$(date +'%b-%d-%Y')_${{ inputs.change_details }}"
@@ -134,7 +145,7 @@ jobs:
             echo "|---|---|"
             echo "| Branch created | \`${{ env.BRANCH_NAME }}\` ✅ |"
             echo "| UAT merged | ✅ |"
-            echo "| PR created | ${{ steps.create_pr.outputs.pull-request-url }} ✅ |"
+            echo "| PR created | ${{ env.PR_URL }} ✅ |"
             echo "| Merged to main | ✅ |"
             echo "| Tagged | \`${{ inputs.version_tag }}\` ✅ |"
           } >> "$GITHUB_STEP_SUMMARY"
