@@ -99,8 +99,8 @@ jobs:
             --head "${{ env.BRANCH_NAME }}" \
             --title "${TITLE}" \
             --body "${BODY}" \
-            --label "production" \
-            --label "deployment")
+
+)
 
           echo "PR_URL=${PR_URL}" >> "$GITHUB_ENV"
           PR_NUMBER=$(echo "${PR_URL}" | grep -oE '[0-9]+$')
