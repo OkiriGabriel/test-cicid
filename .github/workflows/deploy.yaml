@@ -19,11 +19,15 @@ on:
 env:
   ENV: PROD
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   deploy:
     name: Production Deployment
     runs-on: ubuntu-latest
-    environment: production  # Requires approval from reviewers before proceeding
+    environment: production
 
     steps:
       # ── Step 1: Checkout main and Pull Latest Changes ──────────────────────
@@ -31,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0   # Full history needed for merging
+          fetch-depth: 0
 
       # ── Step 2: Create Production Deployment Branch ─────────────────────────
       - name: Create Production Deployment Branch
@@ -46,7 +50,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git checkout -b "${BRANCH_NAME}"
-          echo " Created branch: ${BRANCH_NAME}"
+          echo "✅ Created branch: ${BRANCH_NAME}"
 
       # ── Step 3: Merge UAT Branch into Production Branch ────────────────────
       - name: Merge UAT into Production Branch
@@ -55,13 +59,13 @@ jobs:
           git merge -X theirs origin/UAT \
             --no-edit \
             -m "chore: merge UAT into ${{ env.BRANCH_NAME }} for production deployment"
-          echo " Merged UAT into ${{ env.BRANCH_NAME }} (theirs strategy)"
+          echo "✅ Merged UAT into ${{ env.BRANCH_NAME }} (theirs strategy)"
 
       # ── Step 4: Push Production Branch to Remote ───────────────────────────
       - name: Push Production Branch to Remote
         run: |
           git push origin "${{ env.BRANCH_NAME }}"
-          echo " Pushed ${{ env.BRANCH_NAME }} to origin"
+          echo "✅ Pushed ${{ env.BRANCH_NAME }} to origin"
 
       # ── Step 5 & 6: Create Pull Request targeting main ─────────────────────
       - name: Create Pull Request to main
@@ -75,11 +79,11 @@ jobs:
           body: |
             ## Production Deployment
 
-            | Field        | Value |
+            | Field            | Value |
             |---|---|
-            | **Branch**   | `${{ env.BRANCH_NAME }}` |
-            | **Target**   | `main` |
-            | **RITM**     | ${{ inputs.ritm_ticket || 'N/A' }} |
+            | **Branch**       | `${{ env.BRANCH_NAME }}` |
+            | **Target**       | `main` |
+            | **RITM**         | ${{ inputs.ritm_ticket || 'N/A' }} |
             | **Triggered by** | @${{ github.actor }} |
 
             ### Checklist
@@ -92,10 +96,11 @@ jobs:
 
       - name: Output PR URL
         run: |
-          echo " Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
+          echo "✅ Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
 
-      # ── Step 7: PR Review happens via GitHub's native approval mechanism ────
-      # (Enforced by branch protection rules on main — require N approvals)
+      # ── Step 7: Approval gate via GitHub Environment protection ─────────────
+      # Workflow pauses here until a reviewer approves in:
+      # Settings → Environments → production → Required reviewers
 
       # ── Step 8: Merge to main (after approval) ─────────────────────────────
       - name: Merge PR to main
@@ -117,19 +122,19 @@ jobs:
 
           git tag -a "${TAG}" -m "${MESSAGE}"
           git push origin tag "${TAG}"
-          echo "Tagged build: ${TAG} with message '${MESSAGE}'"
+          echo "✅ Tagged build: ${TAG} with message '${MESSAGE}'"
 
       # ── Summary ─────────────────────────────────────────────────────────────
       - name: Deployment Summary
         run: |
           {
-            echo "## Production Deployment Complete"
+            echo "## 🚀 Production Deployment Complete"
             echo ""
             echo "| Step | Status |"
             echo "|---|---|"
-            echo "| Branch created | \`${{ env.BRANCH_NAME }}\` git push origin main |"
-            echo "| UAT merged |  |"
-            echo "| PR created | ${{ steps.create_pr.outputs.pull-request-url }}  |"
-            echo "| Merged to main |  |"
-            echo "| Tagged | \`${{ inputs.version_tag }}\` |"
+            echo "| Branch created | \`${{ env.BRANCH_NAME }}\` ✅ |"
+            echo "| UAT merged | ✅ |"
+            echo "| PR created | ${{ steps.create_pr.outputs.pull-request-url }} ✅ |"
+            echo "| Merged to main | ✅ |"
+            echo "| Tagged | \`${{ inputs.version_tag }}\` ✅ |"
           } >> "$GITHUB_STEP_SUMMARY"
