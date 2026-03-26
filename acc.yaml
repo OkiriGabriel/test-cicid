@@ -1,0 +1,875 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  WEG Finance PRD Account - us-east-1
+  Naming Convention: weg-finance-<env>-<region>-<awsresource>
+  VPC CIDR: 10.151.32.0/24
+  2 Public Subnets: 10.151.32.0/27, 10.151.32.32/27
+  2 Private Subnets: 10.151.32.64/27, 10.151.32.96/27
+
+# ============================================================
+# PARAMETERS
+# ============================================================
+Parameters:
+
+  VpcCidr:
+    Type: String
+    Default: "10.151.32.0/24"
+    Description: Finance Prod VPC CIDR
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: "10.151.32.0/27"
+    Description: Public Subnet 1 (us-east-1a)
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: "10.151.32.32/27"
+    Description: Public Subnet 2 (us-east-1b)
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: "10.151.32.64/27"
+    Description: Private Subnet 1 (us-east-1a)
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: "10.151.32.96/27"
+    Description: Private Subnet 2 (us-east-1b)
+
+  TransitGatewayId:
+    Type: String
+    Default: "tgw-09472a6a6592ae31f"
+    Description: Network Prod TGW (us-east-1, Account 637423351044)
+
+  NetworkProdAccountId:
+    Type: String
+    Default: "637423351044"
+    Description: Network Prod AWS Account ID
+
+  EnableS3FlowLogs:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable VPC flow logs to S3 - turn on after Moder sets up prod S3 bucket
+
+  S3BucketNameForLogs:
+    Type: String
+    Default: ""
+    Description: S3 bucket name for flow logs (New S3 bucket for Finance Team - Jesse/Aaron)
+
+# ============================================================
+# CONDITIONS
+# ============================================================
+Conditions:
+  EnableFlowLogs: !Equals [!Ref EnableS3FlowLogs, "true"]
+  HasS3Bucket: !Not [!Equals [!Ref S3BucketNameForLogs, ""]]
+  EnableS3FlowLogsCondition: !And
+    - !Condition EnableFlowLogs
+    - !Condition HasS3Bucket
+
+# ============================================================
+# RESOURCES
+# ============================================================
+Resources:
+
+  # ----------------------------------------------------------
+  # VPC
+  # weg-finance-prod-east1-vpc
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-vpc
+        - Key: Environment
+          Value: prod
+        - Key: Region
+          Value: east1
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ----------------------------------------------------------
+  # INTERNET GATEWAY
+  # weg-finance-prod-east1-igw
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-igw
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      InternetGatewayId: !Ref WEGFinanceProdEast1IGW
+
+  # ----------------------------------------------------------
+  # PUBLIC SUBNETS
+  # weg-finance-prod-east1-pub-sub-1a  (10.151.32.0/27)
+  # weg-finance-prod-east1-pub-sub-1b  (10.151.32.32/27)
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1PubSub1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      CidrBlock: !Ref PublicSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-pub-sub-1a
+        - Key: Environment
+          Value: prod
+        - Key: SubnetType
+          Value: Public
+
+  WEGFinanceProdEast1PubSub1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      CidrBlock: !Ref PublicSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-pub-sub-1b
+        - Key: Environment
+          Value: prod
+        - Key: SubnetType
+          Value: Public
+
+  # ----------------------------------------------------------
+  # PRIVATE SUBNETS
+  # weg-finance-prod-east1-priv-sub-1a  (10.151.32.64/27)
+  # weg-finance-prod-east1-priv-sub-1b  (10.151.32.96/27)
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1PrivSub1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-priv-sub-1a
+        - Key: Environment
+          Value: prod
+        - Key: SubnetType
+          Value: Private
+
+  WEGFinanceProdEast1PrivSub1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-priv-sub-1b
+        - Key: Environment
+          Value: prod
+        - Key: SubnetType
+          Value: Private
+
+  # ----------------------------------------------------------
+  # PUBLIC ROUTE TABLE
+  # weg-finance-prod-east1-pub-rtb
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1PubRTB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-pub-rtb
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1PubRouteIGW:
+    Type: AWS::EC2::Route
+    DependsOn: WEGFinanceProdEast1IGWAttachment
+    Properties:
+      RouteTableId: !Ref WEGFinanceProdEast1PubRTB
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref WEGFinanceProdEast1IGW
+
+  WEGFinanceProdEast1PubRouteTGW1:
+    Type: AWS::EC2::Route
+    DependsOn: WEGFinanceProdEast1TGWAttach
+    Properties:
+      RouteTableId: !Ref WEGFinanceProdEast1PubRTB
+      DestinationCidrBlock: "10.150.0.0/15"
+      TransitGatewayId: !Ref TransitGatewayId
+
+  WEGFinanceProdEast1PubRouteTGW2:
+    Type: AWS::EC2::Route
+    DependsOn: WEGFinanceProdEast1TGWAttach
+    Properties:
+      RouteTableId: !Ref WEGFinanceProdEast1PubRTB
+      DestinationCidrBlock: "10.152.0.0/14"
+      TransitGatewayId: !Ref TransitGatewayId
+
+  WEGFinanceProdEast1PubSub1aRTBAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref WEGFinanceProdEast1PubSub1a
+      RouteTableId: !Ref WEGFinanceProdEast1PubRTB
+
+  WEGFinanceProdEast1PubSub1bRTBAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref WEGFinanceProdEast1PubSub1b
+      RouteTableId: !Ref WEGFinanceProdEast1PubRTB
+
+  # ----------------------------------------------------------
+  # PRIVATE ROUTE TABLE
+  # weg-finance-prod-east1-priv-rtb
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1PrivRTB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-priv-rtb
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1PrivRouteTGW1:
+    Type: AWS::EC2::Route
+    DependsOn: WEGFinanceProdEast1TGWAttach
+    Properties:
+      RouteTableId: !Ref WEGFinanceProdEast1PrivRTB
+      DestinationCidrBlock: "10.150.0.0/15"
+      TransitGatewayId: !Ref TransitGatewayId
+
+  WEGFinanceProdEast1PrivRouteTGW2:
+    Type: AWS::EC2::Route
+    DependsOn: WEGFinanceProdEast1TGWAttach
+    Properties:
+      RouteTableId: !Ref WEGFinanceProdEast1PrivRTB
+      DestinationCidrBlock: "10.152.0.0/14"
+      TransitGatewayId: !Ref TransitGatewayId
+
+  WEGFinanceProdEast1PrivSub1aRTBAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref WEGFinanceProdEast1PrivSub1a
+      RouteTableId: !Ref WEGFinanceProdEast1PrivRTB
+
+  WEGFinanceProdEast1PrivSub1bRTBAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref WEGFinanceProdEast1PrivSub1b
+      RouteTableId: !Ref WEGFinanceProdEast1PrivRTB
+
+  # ----------------------------------------------------------
+  # TRANSIT GATEWAY ATTACHMENT
+  # weg-finance-prod-east1-tgw-attach
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1TGWAttach:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayId
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      SubnetIds:
+        - !Ref WEGFinanceProdEast1PrivSub1a
+        - !Ref WEGFinanceProdEast1PrivSub1b
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-tgw-attach
+        - Key: Environment
+          Value: prod
+
+  # ----------------------------------------------------------
+  # SECURITY GROUP
+  # weg-finance-prod-east1-sg
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: weg-finance-prod-east1-sg
+      GroupDescription: Default SG for weg-finance-prod-east1-vpc - deny all inbound
+      VpcId: !Ref WEGFinanceProdEast1VPC
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+          Description: Allow all outbound via TGW/NAT in Network Prod account
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-sg
+        - Key: Environment
+          Value: prod
+
+  # ----------------------------------------------------------
+  # VPC FLOW LOGS
+  # weg-finance-prod-east1-flowlog
+  # Off by default - enable after Moder sets up S3 bucket
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1FlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weg-finance-prod-east1-flowlog-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: weg-finance-prod-east1-flowlog-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: "*"
+              - !If
+                - EnableS3FlowLogsCondition
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                    - s3:GetBucketAcl
+                  Resource:
+                    - !Sub "arn:aws:s3:::${S3BucketNameForLogs}"
+                    - !Sub "arn:aws:s3:::${S3BucketNameForLogs}/*"
+                - !Ref AWS::NoValue
+
+  WEGFinanceProdEast1FlowLog:
+    Type: AWS::EC2::FlowLog
+    Condition: EnableS3FlowLogsCondition
+    Properties:
+      ResourceId: !Ref WEGFinanceProdEast1VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      LogDestinationType: s3
+      LogDestination: !Sub "arn:aws:s3:::${S3BucketNameForLogs}/weg-finance-prod-east1-flowlog/"
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-flowlog
+
+  # ----------------------------------------------------------
+  # IAM ROLES
+  # weg-finance-prod-east1-finance-role
+  # weg-finance-prod-east1-moder-role
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1FinanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weg-finance-prod-east1-finance-role
+      Description: Finance team access - provisioned via Identity Center
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-finance-role
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1ModerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weg-finance-prod-east1-moder-role
+      Description: Moder team cross-account access - provisioned via Identity Center
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${NetworkProdAccountId}:root"
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-moder-role
+        - Key: Environment
+          Value: prod
+
+  # ----------------------------------------------------------
+  # S3 BUCKET
+  # weg-finance-prod-east1-s3
+  # IAM Policy: s3:* + lambda:Invoke* + glue:StartJobRun
+  # weg-finance-prod-east1-s3-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1S3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "weg-finance-prod-east1-s3-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-s3
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1S3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: weg-finance-prod-east1-s3-policy
+      Description: S3 full access + Lambda + Glue scoped to weg-finance-prod-east1
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3FullAccess
+            Effect: Allow
+            Action:
+              - s3:*
+            Resource:
+              - !GetAtt WEGFinanceProdEast1S3.Arn
+              - !Sub "${WEGFinanceProdEast1S3.Arn}/*"
+          - Sid: LambdaAccess
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+              - lambda:InvokeAsync
+            Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:weg-finance-prod-east1-*"
+          - Sid: GlueAccess
+            Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+              - glue:GetJobRuns
+              - glue:BatchStopJobRun
+            Resource: !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:job/weg-finance-prod-east1-*"
+
+  # ----------------------------------------------------------
+  # GLUE
+  # weg-finance-prod-east1-gluedb
+  # weg-finance-prod-east1-glue-role
+  # IAM Policy: s3:ListBucket + s3:GetObject + glue:StartJobRun + athena:StartQueryExecution
+  # weg-finance-prod-east1-glue-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1GlueDB:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: weg-finance-prod-east1-gluedb
+        Description: Glue catalog database for weg-finance-prod-east1
+
+  WEGFinanceProdEast1GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weg-finance-prod-east1-glue-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-glue-role
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1GluePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: weg-finance-prod-east1-glue-policy
+      Description: Glue policy - S3 read + StartJobRun + Athena query scoped to weg-finance-prod-east1
+      Roles:
+        - !Ref WEGFinanceProdEast1GlueRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3ListBucket
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource:
+              - !GetAtt WEGFinanceProdEast1S3.Arn
+          - Sid: S3GetObject
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !Sub "${WEGFinanceProdEast1S3.Arn}/*"
+          - Sid: GlueStartJobRun
+            Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+              - glue:GetJobRuns
+            Resource: !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:job/weg-finance-prod-east1-*"
+          - Sid: AthenaStartQueryExecution
+            Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+            Resource: !Sub "arn:aws:athena:us-east-1:${AWS::AccountId}:workgroup/weg-finance-prod-east1-athena-wg"
+
+  # ----------------------------------------------------------
+  # LAMBDA EXECUTION ROLE
+  # weg-finance-prod-east1-lambda-role
+  # IAM Policy: UpdateFunctionCode, InvokeFunction, StartJobRun,
+  #   GetFunctionEventInvokeConfig, PutFunctionEventInvokeConfig,
+  #   GetPolicy, AddPermission, events:PutRule
+  # weg-finance-prod-east1-lambda-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weg-finance-prod-east1-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-lambda-role
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1LambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: weg-finance-prod-east1-lambda-policy
+      Description: Lambda management policy scoped to weg-finance-prod-east1
+      Roles:
+        - !Ref WEGFinanceProdEast1LambdaRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaManagement
+            Effect: Allow
+            Action:
+              - lambda:UpdateFunctionCode
+              - lambda:InvokeFunction
+              - lambda:GetFunctionEventInvokeConfig
+              - lambda:PutFunctionEventInvokeConfig
+              - lambda:GetPolicy
+              - lambda:AddPermission
+            Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:weg-finance-prod-east1-*"
+          - Sid: GlueStartJobRun
+            Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+            Resource: !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:job/weg-finance-prod-east1-*"
+          - Sid: EventBridgePutRule
+            Effect: Allow
+            Action:
+              - events:PutRule
+              - events:PutTargets
+              - events:DescribeRule
+            Resource: !Sub "arn:aws:events:us-east-1:${AWS::AccountId}:rule/weg-finance-prod-east1-*"
+          - Sid: S3ReadWrite
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt WEGFinanceProdEast1S3.Arn
+              - !Sub "${WEGFinanceProdEast1S3.Arn}/*"
+
+  # ----------------------------------------------------------
+  # ATHENA WORKGROUP
+  # weg-finance-prod-east1-athena-wg
+  # IAM Policy: ListDataCatalogs + CreateDataCatalog
+  # weg-finance-prod-east1-athena-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1AthenaWG:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: weg-finance-prod-east1-athena-wg
+      Description: Athena workgroup for weg-finance-prod-east1
+      State: ENABLED
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${WEGFinanceProdEast1S3}/weg-finance-prod-east1-athena-results/"
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-athena-wg
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1AthenaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: weg-finance-prod-east1-athena-policy
+      Description: Athena catalog policy scoped to weg-finance-prod-east1
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AthenaDataCatalog
+            Effect: Allow
+            Action:
+              - athena:ListDataCatalogs
+              - athena:CreateDataCatalog
+              - athena:DeleteDataCatalog
+              - athena:GetDataCatalog
+              - athena:UpdateDataCatalog
+            Resource: !Sub "arn:aws:athena:us-east-1:${AWS::AccountId}:datacatalog/*"
+          - Sid: AthenaWorkgroup
+            Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+              - athena:StopQueryExecution
+              - athena:ListQueryExecutions
+            Resource: !Sub "arn:aws:athena:us-east-1:${AWS::AccountId}:workgroup/weg-finance-prod-east1-athena-wg"
+          - Sid: GlueForAthena
+            Effect: Allow
+            Action:
+              - glue:GetDatabase
+              - glue:GetDatabases
+              - glue:GetTable
+              - glue:GetTables
+              - glue:GetPartition
+              - glue:GetPartitions
+            Resource:
+              - !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:catalog"
+              - !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:database/weg-finance-prod-east1-*"
+              - !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:table/weg-finance-prod-east1-*/*"
+
+  # ----------------------------------------------------------
+  # SNS TOPIC
+  # weg-finance-prod-east1-sns
+  # IAM Policy: sns:ListTopics + sns:Subscribe + glue:StartJobRun
+  #   + glue:GetJobRun + sns:Publish
+  # weg-finance-prod-east1-sns-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1SNS:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: weg-finance-prod-east1-sns
+      DisplayName: weg-finance-prod-east1-sns
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - Key: Name
+          Value: weg-finance-prod-east1-sns
+        - Key: Environment
+          Value: prod
+
+  WEGFinanceProdEast1SNSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: weg-finance-prod-east1-sns-policy
+      Description: SNS + Glue orchestration policy scoped to weg-finance-prod-east1
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SNSOperations
+            Effect: Allow
+            Action:
+              - sns:ListTopics
+              - sns:Subscribe
+              - sns:Publish
+              - sns:GetTopicAttributes
+              - sns:ListSubscriptionsByTopic
+            Resource:
+              - !Ref WEGFinanceProdEast1SNS
+          - Sid: GlueOrchestration
+            Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+              - glue:GetJobRuns
+              - glue:BatchStopJobRun
+            Resource: !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:job/weg-finance-prod-east1-*"
+
+  # ----------------------------------------------------------
+  # MODER ROLE INLINE POLICY
+  # weg-finance-prod-east1-moder-inline-policy
+  # ----------------------------------------------------------
+  WEGFinanceProdEast1ModerInlinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: weg-finance-prod-east1-moder-inline-policy
+      Roles:
+        - !Ref WEGFinanceProdEast1ModerRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: S3Access
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - !GetAtt WEGFinanceProdEast1S3.Arn
+              - !Sub "${WEGFinanceProdEast1S3.Arn}/*"
+          - Sid: GlueAccess
+            Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+              - glue:GetJobRuns
+            Resource: !Sub "arn:aws:glue:us-east-1:${AWS::AccountId}:job/weg-finance-prod-east1-*"
+          - Sid: AthenaAccess
+            Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+            Resource: !Sub "arn:aws:athena:us-east-1:${AWS::AccountId}:workgroup/weg-finance-prod-east1-athena-wg"
+
+# ============================================================
+# OUTPUTS
+# ============================================================
+Outputs:
+
+  VPCId:
+    Description: weg-finance-prod-east1-vpc
+    Value: !Ref WEGFinanceProdEast1VPC
+    Export:
+      Name: !Sub "${AWS::StackName}-vpc"
+
+  VPCCidr:
+    Description: weg-finance-prod-east1-vpc CIDR
+    Value: !GetAtt WEGFinanceProdEast1VPC.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-vpc-cidr"
+
+  PubSub1a:
+    Description: weg-finance-prod-east1-pub-sub-1a (10.151.32.0/27)
+    Value: !Ref WEGFinanceProdEast1PubSub1a
+    Export:
+      Name: !Sub "${AWS::StackName}-pub-sub-1a"
+
+  PubSub1b:
+    Description: weg-finance-prod-east1-pub-sub-1b (10.151.32.32/27)
+    Value: !Ref WEGFinanceProdEast1PubSub1b
+    Export:
+      Name: !Sub "${AWS::StackName}-pub-sub-1b"
+
+  PrivSub1a:
+    Description: weg-finance-prod-east1-priv-sub-1a (10.151.32.64/27)
+    Value: !Ref WEGFinanceProdEast1PrivSub1a
+    Export:
+      Name: !Sub "${AWS::StackName}-priv-sub-1a"
+
+  PrivSub1b:
+    Description: weg-finance-prod-east1-priv-sub-1b (10.151.32.96/27)
+    Value: !Ref WEGFinanceProdEast1PrivSub1b
+    Export:
+      Name: !Sub "${AWS::StackName}-priv-sub-1b"
+
+  TGWAttach:
+    Description: weg-finance-prod-east1-tgw-attach
+    Value: !Ref WEGFinanceProdEast1TGWAttach
+    Export:
+      Name: !Sub "${AWS::StackName}-tgw-attach"
+
+  SGId:
+    Description: weg-finance-prod-east1-sg
+    Value: !Ref WEGFinanceProdEast1SG
+    Export:
+      Name: !Sub "${AWS::StackName}-sg"
+
+  S3BucketName:
+    Description: weg-finance-prod-east1-s3
+    Value: !Ref WEGFinanceProdEast1S3
+    Export:
+      Name: !Sub "${AWS::StackName}-s3"
+
+  S3BucketArn:
+    Description: weg-finance-prod-east1-s3 ARN
+    Value: !GetAtt WEGFinanceProdEast1S3.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-s3-arn"
+
+  GlueDB:
+    Description: weg-finance-prod-east1-gluedb
+    Value: !Ref WEGFinanceProdEast1GlueDB
+    Export:
+      Name: !Sub "${AWS::StackName}-gluedb"
+
+  GlueRoleArn:
+    Description: weg-finance-prod-east1-glue-role ARN
+    Value: !GetAtt WEGFinanceProdEast1GlueRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-glue-role"
+
+  LambdaRoleArn:
+    Description: weg-finance-prod-east1-lambda-role ARN
+    Value: !GetAtt WEGFinanceProdEast1LambdaRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-lambda-role"
+
+  AthenaWG:
+    Description: weg-finance-prod-east1-athena-wg
+    Value: !Ref WEGFinanceProdEast1AthenaWG
+    Export:
+      Name: !Sub "${AWS::StackName}-athena-wg"
+
+  SNSTopicArn:
+    Description: weg-finance-prod-east1-sns ARN
+    Value: !Ref WEGFinanceProdEast1SNS
+    Export:
+      Name: !Sub "${AWS::StackName}-sns"
+
+  FinanceRoleArn:
+    Description: weg-finance-prod-east1-finance-role ARN
+    Value: !GetAtt WEGFinanceProdEast1FinanceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-finance-role"
+
+  ModerRoleArn:
+    Description: weg-finance-prod-east1-moder-role ARN
+    Value: !GetAtt WEGFinanceProdEast1ModerRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-moder-role"
+
+  PostDeployChecklist:
+    Description: Steps after deployment
+    Value: >
+      1. Accept TGW attachment from Network Prod account (637423351044).
+      2. Assign weg-finance-prod-east1-finance-role and weg-finance-prod-east1-moder-role in Identity Center.
+      3. Notify Moder (Jean) team - name all Glue jobs and Lambda functions weg-finance-prod-east1-*.
+      4. Re-deploy with EnableS3FlowLogs=true + S3BucketNameForLogs once bucket is ready.
+      5. Confirm TGW route propagation from networkPROD east1.
