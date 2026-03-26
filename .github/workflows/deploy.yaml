@@ -100,7 +100,6 @@ jobs:
             --title "${TITLE}" \
             --body "${BODY}" \
 
-)
 
           echo "PR_URL=${PR_URL}" >> "$GITHUB_ENV"
           PR_NUMBER=$(echo "${PR_URL}" | grep -oE '[0-9]+$')
