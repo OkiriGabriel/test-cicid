@@ -57,7 +57,7 @@ jobs:
           git push origin --delete "${BRANCH_NAME}" 2>/dev/null || true
 
           git checkout -b "${BRANCH_NAME}"
-          echo "✅ Created branch: ${BRANCH_NAME}"
+          echo "Created branch: ${BRANCH_NAME}"
 
       # ── Step 3: Merge UAT Branch into Production Branch ────────────────────
       - name: Merge UAT into Production Branch
@@ -66,13 +66,13 @@ jobs:
           git merge -X theirs origin/UAT \
             --no-edit \
             -m "chore: merge UAT into ${{ env.BRANCH_NAME }} for production deployment"
-          echo "✅ Merged UAT into ${{ env.BRANCH_NAME }} (theirs strategy)"
+          echo "Merged UAT into ${{ env.BRANCH_NAME }} (theirs strategy)"
 
       # ── Step 4: Push Production Branch to Remote ───────────────────────────
       - name: Push Production Branch to Remote
         run: |
           git push --force-with-lease origin "${{ env.BRANCH_NAME }}"
-          echo "✅ Pushed ${{ env.BRANCH_NAME }} to origin"
+          echo "Pushed ${{ env.BRANCH_NAME }} to origin"
 
       # ── Step 5 & 6: Create Pull Request targeting main ─────────────────────
       - name: Create Pull Request to main
@@ -105,48 +105,153 @@ jobs:
 
       - name: Output PR URL
         run: |
-          echo "✅ Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
+          echo "Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
+          echo "Preparing for automated merge..."
 
-      # ── Step 7: Approval gate via GitHub Environment protection ─────────────
-      # Workflow pauses here until a reviewer approves in:
-      # Settings → Environments → production → Required reviewers
+      # ── Step 7: Brief pause to ensure PR is ready ──────────────────────────
+      - name: Wait for PR to be ready
+        run: |
+          echo "Waiting 10 seconds for PR to be fully processed..."
+          sleep 10
 
-      # ── Step 8: Merge PR to main ────────────────────────────────────────────
-      - name: Merge PR to main
+      # ── Step 8: Attempt Automated Merge to Main ────────────────────────────
+      - name: Try Auto-Merge PR to Main
+        id: auto_merge
+        continue-on-error: true
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
           token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
           merge-method: merge
 
-      - name: Output Merge Status
+      # ── Step 9: Check Auto-Merge Status and Wait for Merge ─────────────────
+      - name: Wait for PR Merge (Auto or Manual)
+        id: wait_merge
         run: |
-          echo "✅ PR #${{ steps.create_pr.outputs.pull-request-number }} set to auto-merge"
+          echo "Checking auto-merge status..."
+          
+          # Check if auto-merge was successful
+          if [ "${{ steps.auto_merge.outcome }}" = "success" ]; then
+            echo "Auto-merge enabled successfully"
+            echo "Waiting for automatic merge to complete..."
+            WAIT_MESSAGE="auto-merge"
+          else
+            echo "Auto-merge failed or not available"
+            echo "**MANUAL MERGE REQUIRED**"
+            echo ""
+            echo "Please manually merge the PR: ${{ steps.create_pr.outputs.pull-request-url }}"
+            echo "The workflow will continue automatically once merged."
+            WAIT_MESSAGE="manual merge"
+          fi
+          
+          echo "wait_type=${WAIT_MESSAGE}" >> "$GITHUB_OUTPUT"
+          
+          # If auto-merge failed, show manual merge instructions
+          if [ "${{ steps.auto_merge.outcome }}" != "success" ]; then
+            {
+              echo "## Manual Merge Required"
+              echo ""
+              echo "Auto-merge could not be enabled. Please manually merge the PR to continue:"
+              echo ""
+              echo "**[Click here to merge PR #${{ steps.create_pr.outputs.pull-request-number }}](${{ steps.create_pr.outputs.pull-request-url }})**"
+              echo ""
+              echo "The workflow will automatically continue with tagging once the PR is merged."
+              echo ""
+              echo "| Field | Value |"
+              echo "|-------|-------|"
+              echo "| PR Number | #${{ steps.create_pr.outputs.pull-request-number }} |"
+              echo "| Branch | \`${{ env.BRANCH_NAME }}\` |"
+              echo "| Status | Waiting for manual merge |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
+          # Wait for PR to be merged (either auto or manual)
+          echo "Waiting for ${WAIT_MESSAGE} of PR #${{ steps.create_pr.outputs.pull-request-number }}..."
+          
+          MERGED=false
+          # Wait up to 30 minutes (180 attempts * 10 seconds)
+          for i in {1..180}; do
+            sleep 10
+            
+            # Check if PR is merged using GitHub API
+            MERGE_STATUS=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ steps.create_pr.outputs.pull-request-number }}" \
+              | jq -r '.merged')
+            
+            if [ "$MERGE_STATUS" = "true" ]; then
+              echo "PR #${{ steps.create_pr.outputs.pull-request-number }} has been merged!"
+              MERGED=true
+              break
+            fi
+            
+            # Show different messages based on merge type
+            if [ "${{ steps.auto_merge.outcome }}" = "success" ]; then
+              echo "Waiting for auto-merge... (attempt $i/180)"
+            else
+              if [ $((i % 6)) -eq 0 ]; then  # Show message every minute
+                echo "Waiting for manual merge... (${i}0 seconds elapsed)"
+                echo "   Please merge PR: ${{ steps.create_pr.outputs.pull-request-url }}"
+              fi
+            fi
+          done
+          
+          if [ "$MERGED" = "false" ]; then
+            echo "Timeout waiting for PR merge after 30 minutes."
+            echo "Please merge the PR manually: ${{ steps.create_pr.outputs.pull-request-url }}"
+            exit 1
+          fi
 
-      # ── Step 9: Tag the build with appropriate version ─────────────────────
-      - name: Checkout main and Tag Build
+      # ── Step 10: Create Production Tag ──────────────────────────────────────
+      - name: Create Production Tag
         run: |
+          # Checkout main and pull latest
           git checkout main
           git pull origin main
-
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create tag
           TAG="${{ inputs.version_tag }}"
           MESSAGE="PROD-Deploy-$(date +'%b-%d-%Y')_${{ inputs.change_details }}"
-
+          
           git tag -a "${TAG}" -m "${MESSAGE}"
           git push origin tag "${TAG}"
-          echo "✅ Tagged build: ${TAG} with message '${MESSAGE}'"
+          
+          echo "Tagged production build: ${TAG}"
+          echo "Tag message: ${MESSAGE}"
 
-      # ── Summary ─────────────────────────────────────────────────────────────
-      - name: Deployment Summary
+      # ── Step 11: Deployment Complete Summary ────────────────────────────────
+      - name: Deployment Complete Summary
         run: |
+          # Determine merge method for display
+          if [ "${{ steps.auto_merge.outcome }}" = "success" ]; then
+            MERGE_METHOD="Auto-merged"
+          else
+            MERGE_METHOD="Manually merged"
+          fi
+          
           {
-            echo "## 🚀 Production Deployment Complete"
+            echo "## Production Deployment Complete"
             echo ""
             echo "| Step | Status |"
-            echo "|---|---|"
-            echo "| Branch created | \`${{ env.BRANCH_NAME }}\` ✅ |"
-            echo "| UAT merged | ✅ |"
-            echo "| PR created | ${{ env.PR_URL }} ✅ |"
-            echo "| Merged to main | ✅ |"
-            echo "| Tagged | \`${{ inputs.version_tag }}\` ✅ |"
+            echo "|------|--------|"
+            echo "| Branch Created | \`${{ env.BRANCH_NAME }}\` |"
+            echo "| UAT Merged | Completed |"
+            echo "| PR Created | #${{ steps.create_pr.outputs.pull-request-number }} |"
+            echo "| PR Merged | ${MERGE_METHOD} |"
+            echo "| Production Tagged | \`${{ inputs.version_tag }}\` |"
+            echo ""
+            echo "**Deployment Details:**"
+            echo "- **Change:** ${{ inputs.change_details }}"
+            echo "- **Version:** \`${{ inputs.version_tag }}\`"
+            echo "- **Branch:** \`${{ env.BRANCH_NAME }}\`"
+            echo "- **PR:** ${{ steps.create_pr.outputs.pull-request-url }}"
+            echo "- **Merge Method:** ${{ steps.wait_merge.outputs.wait_type }}"
+            echo "- **Completed:** $(date)"
+            echo ""
+            echo "**Production deployment successful!**"
           } >> "$GITHUB_STEP_SUMMARY"
