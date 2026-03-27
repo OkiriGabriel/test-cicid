@@ -77,7 +77,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ env.BRANCH_NAME }}
           base: main
-          title: "PROD Deploy: ${{ env.BRANCH_NAME }}${{ inputs.ritm_ticket && format(' [{0}]', inputs.ritm_ticket) || '' }}"
+          title: "PROD Deploy: ${{ env.BRANCH_NAME }}"
           body: |
             ## Production Deployment
 
@@ -85,7 +85,9 @@ jobs:
             |---|---|
             | **Branch**   | `${{ env.BRANCH_NAME }}` |
             | **Target**   | `main` |
-            | **RITM**     | ${{ inputs.ritm_ticket || 'N/A' }} |
+            | **Change Details** | `${{ inputs.change_details }}` |
+            | **Version Tag** | `${{ inputs.version_tag }}` |
+            | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
             | **Triggered by** | @${{ github.actor }} |
 
             ### Checklist
