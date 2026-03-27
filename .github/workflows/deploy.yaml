@@ -22,6 +22,8 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
+  metadata: read
 
 jobs:
   deploy:
@@ -76,40 +78,35 @@ jobs:
       # ── Step 5 & 6: Create Pull Request targeting main ─────────────────────
       - name: Create Pull Request to main
         id: create_pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: ${{ env.BRANCH_NAME }}
+          base: main
+          title: "PROD Deploy: ${{ env.BRANCH_NAME }}"
+          body: |
+            ## Production Deployment
+
+            | Field        | Value |
+            |---|---|
+            | **Branch**   | `${{ env.BRANCH_NAME }}` |
+            | **Target**   | `main` |
+            | **Change Details** | `${{ inputs.change_details }}` |
+            | **Version Tag** | `${{ inputs.version_tag }}` |
+            | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
+            | **Triggered by** | @${{ github.actor }} |
+
+            ### Checklist
+            - [ ] Source branch: `${{ env.BRANCH_NAME }}`
+            - [ ] Destination: `main`
+            - [ ] Merge conflicts resolved
+            - [ ] Stakeholders reviewed
+          labels: production, deployment
+          draft: false
+
+      - name: Output PR URL
         run: |
-          TITLE="PROD Deploy: ${{ env.BRANCH_NAME }}"
-          if [ -n "${{ inputs.ritm_ticket }}" ]; then
-            TITLE="${TITLE} [${{ inputs.ritm_ticket }}]"
-          fi
-
-          BODY="## Production Deployment
-
-          | Field            | Value |
-          |---|---|
-          | **Branch**       | \`${{ env.BRANCH_NAME }}\` |
-          | **Target**       | \`main\` |
-          | **RITM**         | ${{ inputs.ritm_ticket || 'N/A' }} |
-          | **Triggered by** | @${{ github.actor }} |
-
-          ### Checklist
-          - [ ] Source branch: \`${{ env.BRANCH_NAME }}\`
-          - [ ] Destination: \`main\`
-          - [ ] Merge conflicts resolved
-          - [ ] Stakeholders reviewed"
-
-          PR_URL=$(gh pr create \
-            --repo "${{ github.repository }}" \
-            --base main \
-            --head "${{ env.BRANCH_NAME }}" \
-            --title "${TITLE}" \
-            --body "${BODY}")
-
-          echo "PR_URL=${PR_URL}" >> "$GITHUB_ENV"
-          PR_NUMBER=$(echo "${PR_URL}" | grep -oE '[0-9]+$')
-          echo "PR_NUMBER=${PR_NUMBER}" >> "$GITHUB_ENV"
-          echo "✅ Pull Request created: ${PR_URL}"
+          echo "✅ Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
 
       # ── Step 7: Approval gate via GitHub Environment protection ─────────────
       # Workflow pauses here until a reviewer approves in:
@@ -117,11 +114,11 @@ jobs:
 
       # ── Step 8: Merge PR to main ────────────────────────────────────────────
       - name: Merge PR to main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr merge "${{ env.PR_NUMBER }}" \
-            --repo "${{ github.repository }}" \
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
+          merge-method: merge
             --merge \
             --admin
           echo "✅ PR #${{ env.PR_NUMBER }} merged into main"
