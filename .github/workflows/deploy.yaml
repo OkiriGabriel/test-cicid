@@ -23,7 +23,6 @@ permissions:
   contents: write
   pull-requests: write
   actions: read
-  metadata: read
 
 jobs:
   deploy:
@@ -119,9 +118,10 @@ jobs:
           token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
           merge-method: merge
-            --merge \
-            --admin
-          echo "✅ PR #${{ env.PR_NUMBER }} merged into main"
+
+      - name: Output Merge Status
+        run: |
+          echo "✅ PR #${{ steps.create_pr.outputs.pull-request-number }} set to auto-merge"
 
       # ── Step 9: Tag the build with appropriate version ─────────────────────
       - name: Checkout main and Tag Build
