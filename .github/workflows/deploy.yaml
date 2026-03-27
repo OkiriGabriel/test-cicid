@@ -82,6 +82,11 @@ jobs:
         run: |
           echo "Creating PR using gh CLI..."
           
+          # Ensure labels exist
+          echo "Creating labels if they don't exist..."
+          gh label create "production" --color "d73a4a" --description "Production deployment" 2>/dev/null || echo "Label 'production' already exists"
+          gh label create "deployment" --color "0075ca" --description "Deployment related" 2>/dev/null || echo "Label 'deployment' already exists"
+          
           # Create PR body
           PR_BODY="## Production Deployment
 
@@ -100,7 +105,7 @@ jobs:
           - [ ] Merge conflicts resolved
           - [ ] Stakeholders reviewed"
 
-          # Create the PR
+          # Create the PR with labels
           PR_URL=$(gh pr create \
             --repo "${{ github.repository }}" \
             --base main \
