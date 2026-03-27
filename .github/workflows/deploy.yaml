@@ -77,47 +77,77 @@ jobs:
       # ── Step 5 & 6: Create Pull Request targeting main ─────────────────────
       - name: Create Pull Request to main
         id: create_pr
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          branch: ${{ env.BRANCH_NAME }}
-          base: main
-          title: "PROD Deploy: ${{ env.BRANCH_NAME }}"
-          body: |
-            ## Production Deployment
-
-            | Field        | Value |
-            |---|---|
-            | **Branch**   | `${{ env.BRANCH_NAME }}` |
-            | **Target**   | `main` |
-            | **Change Details** | `${{ inputs.change_details }}` |
-            | **Version Tag** | `${{ inputs.version_tag }}` |
-            | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
-            | **Triggered by** | @${{ github.actor }} |
-
-            ### Checklist
-            - [ ] Source branch: `${{ env.BRANCH_NAME }}`
-            - [ ] Destination: `main`
-            - [ ] Merge conflicts resolved
-            - [ ] Stakeholders reviewed
-          labels: production, deployment
-          draft: false
-
-      - name: Output PR URL
-        run: |
-          if [ -n "${{ steps.create_pr.outputs.pull-request-url }}" ]; then
-            echo "Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
-            echo "PR Number: #${{ steps.create_pr.outputs.pull-request-number }}"
-          else
-            echo "WARNING: PR creation may have failed - no URL returned"
-            echo "Check the previous step for errors"
-            # List any existing PRs for this branch
-            echo "Checking for existing PRs..."
-            gh pr list --head "${{ env.BRANCH_NAME }}" --repo "${{ github.repository }}" || echo "No PRs found for branch"
-          fi
-          echo "Preparing for automated merge..."
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Creating PR using gh CLI..."
+          
+          # Create PR body
+          PR_BODY="## Production Deployment
+
+          | Field        | Value |
+          |---|---|
+          | **Branch**   | \`${{ env.BRANCH_NAME }}\` |
+          | **Target**   | \`main\` |
+          | **Change Details** | \`${{ inputs.change_details }}\` |
+          | **Version Tag** | \`${{ inputs.version_tag }}\` |
+          | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
+          | **Triggered by** | @${{ github.actor }} |
+
+          ### Checklist
+          - [ ] Source branch: \`${{ env.BRANCH_NAME }}\`
+          - [ ] Destination: \`main\`
+          - [ ] Merge conflicts resolved
+          - [ ] Stakeholders reviewed"
+
+          # Create the PR
+          PR_URL=$(gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "${{ env.BRANCH_NAME }}" \
+            --title "PROD Deploy: ${{ env.BRANCH_NAME }}" \
+            --body "$PR_BODY" \
+            --label "production,deployment")
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          
+          # Set outputs
+          echo "pull-request-url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "pull-request-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          
+          echo "PR created successfully:"
+          echo "URL: $PR_URL"
+          echo "Number: $PR_NUMBER"
+
+      - name: Verify PR Creation and Repository Settings
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== PR Creation Status ==="
+          if [ -n "${{ steps.create_pr.outputs.pull-request-url }}" ]; then
+            echo "✓ Pull Request created successfully"
+            echo "  URL: ${{ steps.create_pr.outputs.pull-request-url }}"
+            echo "  Number: #${{ steps.create_pr.outputs.pull-request-number }}"
+          else
+            echo "✗ PR creation failed"
+            echo "Checking for existing PRs on this branch..."
+            gh pr list --head "${{ env.BRANCH_NAME }}" --repo "${{ github.repository }}" || echo "No PRs found"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Repository Auto-Merge Settings ==="
+          # Check if auto-merge is enabled in repository
+          REPO_INFO=$(gh api repos/${{ github.repository }} --jq '.allow_auto_merge')
+          if [ "$REPO_INFO" = "true" ]; then
+            echo "✓ Auto-merge is enabled in repository settings"
+          else
+            echo "✗ Auto-merge is NOT enabled in repository settings"
+            echo "  Go to Settings → General → Pull Requests → Allow auto-merge"
+          fi
+          
+          echo "Preparing for merge attempt..."
 
       # ── Step 7: Brief pause to ensure PR is ready ──────────────────────────
       - name: Wait for PR to be ready
@@ -129,11 +159,22 @@ jobs:
       - name: Try Auto-Merge PR to Main
         id: auto_merge
         continue-on-error: true
-        uses: peter-evans/enable-pull-request-automerge@v3
-        with:
-          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
-          merge-method: merge
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Attempting to enable auto-merge for PR #${{ steps.create_pr.outputs.pull-request-number }}"
+          
+          # Try to enable auto-merge using gh CLI
+          if gh pr merge "${{ steps.create_pr.outputs.pull-request-number }}" \
+            --repo "${{ github.repository }}" \
+            --merge \
+            --auto; then
+            echo "Auto-merge enabled successfully"
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Auto-merge failed - will wait for manual merge"
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── Step 9: Check Auto-Merge Status and Wait for Merge ─────────────────
       - name: Wait for PR Merge (Auto or Manual)
