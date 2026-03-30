@@ -1,0 +1,217 @@
+name: Test to Dev Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      change_details:
+        description: 'Change details (e.g., PSO, hotfix-login, etc.)'
+        required: true
+        type: string
+      version_tag:
+        description: 'Development version tag (e.g., vDEV-5.0)'
+        required: true
+        type: string
+      ritm_ticket:
+        description: 'RITM Ticket number (e.g., RITM2106103)'
+        required: false
+        type: string
+
+env:
+  ENV: DEV
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  deploy:
+    name: Test to Dev Deployment
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      # ── Step 1: Checkout dev and Pull Latest Changes ──────────────────────
+      - name: Checkout dev and Pull Latest Changes
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      # ── Step 2: Create Development Deployment Branch ─────────────────────────
+      - name: Create Development Deployment Branch
+        id: create_branch
+        run: |
+          DATE_STR=$(date +'%b-%d-%Y_%H%M%S')
+          BRANCH_NAME="DEV-Deploy_${DATE_STR}_${{ inputs.change_details }}"
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> "$GITHUB_ENV"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Delete local branch if it exists
+          git branch -D "${BRANCH_NAME}" 2>/dev/null || true
+          
+          # Delete remote branch if it exists
+          git push origin --delete "${BRANCH_NAME}" 2>/dev/null || true
+
+          git checkout -b "${BRANCH_NAME}"
+          echo "Created branch: ${BRANCH_NAME}"
+
+      # ── Step 3: Check for Differences Between Test and Dev ──────────────────
+      - name: Check for Differences Between Test and Dev
+        id: check_diff
+        run: |
+          git fetch origin test
+          git fetch origin dev
+          
+          # Check if there are any differences between test and dev
+          DIFF_COUNT=$(git rev-list --count origin/dev..origin/test)
+          echo "Commits in test not in dev: $DIFF_COUNT"
+          
+          if [ "$DIFF_COUNT" -eq 0 ]; then
+            echo "No differences found between test and dev branches."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "diff_count=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found $DIFF_COUNT commit(s) to deploy from test to dev."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "diff_count=$DIFF_COUNT" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Step 4: Stop Gracefully if No Changes ───────────────────────────────
+      - name: No Changes Summary
+        if: steps.check_diff.outputs.has_changes == 'false'
+        run: |
+          {
+            echo "## No Changes to Deploy"
+            echo ""
+            echo "| Status | Details |"
+            echo "|--------|---------|"
+            echo "| **Result** | No deployment needed |"
+            echo "| **Reason** | Test and dev branches are identical |"
+            echo "| **Action** | Workflow completed successfully |"
+            echo ""
+            echo "**✅ The test and dev branches are already in sync.**"
+            echo ""
+            echo "No pull request was created because there are no changes to deploy."
+            echo ""
+            echo "- **Test branch**: Up to date"
+            echo "- **Dev branch**: Up to date"
+            echo "- **Status**: No action required"
+          } >> "$GITHUB_STEP_SUMMARY"
+          
+          echo "Workflow completed successfully - no changes to deploy."
+
+      # ── Step 5: Merge Test Branch into Development Branch (if changes exist) ─
+      - name: Merge Test into Development Branch
+        if: steps.check_diff.outputs.has_changes == 'true'
+        run: |
+          git merge -X theirs origin/test \
+            --no-edit \
+            -m "chore: merge test into ${{ env.BRANCH_NAME }} for development deployment"
+          echo "Merged test into ${{ env.BRANCH_NAME }} (theirs strategy)"
+          echo "Deployed ${{ steps.check_diff.outputs.diff_count }} commit(s) from test to dev"
+
+      # ── Step 6: Push Development Branch to Remote (if changes exist) ────────
+      - name: Push Development Branch to Remote
+        if: steps.check_diff.outputs.has_changes == 'true'
+        run: |
+          git push --force-with-lease origin "${{ env.BRANCH_NAME }}"
+          echo "Pushed ${{ env.BRANCH_NAME }} to origin"
+
+      # ── Step 7: Create Pull Request targeting dev (if changes exist) ────────
+      - name: Create Pull Request to dev
+        if: steps.check_diff.outputs.has_changes == 'true'
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Creating PR using gh CLI..."
+          
+          # Ensure labels exist
+          echo "Creating labels if they don't exist..."
+          gh label create "development" --color "28a745" --description "Development deployment" 2>/dev/null || echo "Label 'development' already exists"
+          gh label create "deployment" --color "0075ca" --description "Deployment related" 2>/dev/null || echo "Label 'deployment' already exists"
+          
+          # Create PR body
+          PR_BODY="## Development Deployment
+
+          | Field        | Value |
+          |---|---|
+          | **Branch**   | \`${{ env.BRANCH_NAME }}\` |
+          | **Target**   | \`dev\` |
+          | **Change Details** | \`${{ inputs.change_details }}\` |
+          | **Version Tag** | \`${{ inputs.version_tag }}\` |
+          | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
+          | **Commits to Deploy** | ${{ steps.check_diff.outputs.diff_count }} |
+          | **Triggered by** | @${{ github.actor }} |
+
+          ### Checklist
+          - [ ] Source branch: \`${{ env.BRANCH_NAME }}\`
+          - [ ] Destination: \`dev\`
+          - [ ] Merge conflicts resolved
+          - [ ] Stakeholders reviewed"
+
+          # Create the PR with labels
+          PR_URL=$(gh pr create \
+            --repo "${{ github.repository }}" \
+            --base dev \
+            --head "${{ env.BRANCH_NAME }}" \
+            --title "DEV Deploy: ${{ env.BRANCH_NAME }}" \
+            --body "$PR_BODY" \
+            --label "development,deployment")
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          
+          # Set outputs
+          echo "pull-request-url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "pull-request-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          
+          echo "PR created successfully:"
+          echo "URL: $PR_URL"
+          echo "Number: $PR_NUMBER"
+
+      - name: Verify PR Creation
+        if: steps.check_diff.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== PR Creation Status ==="
+          if [ -n "${{ steps.create_pr.outputs.pull-request-url }}" ]; then
+            echo "✓ Pull Request created successfully"
+            echo "  URL: ${{ steps.create_pr.outputs.pull-request-url }}"
+            echo "  Number: #${{ steps.create_pr.outputs.pull-request-number }}"
+          else
+            echo "✗ PR creation failed"
+            exit 1
+          fi
+
+      # ── Step 8: Deployment PR Created Summary (if changes exist) ────────────
+      - name: Deployment PR Created Summary
+        if: steps.check_diff.outputs.has_changes == 'true'
+        run: |
+          {
+            echo "## Test to Dev Deployment PR Created"
+            echo ""
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| Branch Created | \`${{ env.BRANCH_NAME }}\` |"
+            echo "| Test Merged | Completed (${{ steps.check_diff.outputs.diff_count }} commits) |"
+            echo "| PR Created | #${{ steps.create_pr.outputs.pull-request-number }} |"
+            echo "| **Next Step** | **Manual PR Review & Merge Required** |"
+            echo ""
+            echo "**Deployment Details:**"
+            echo "- **Change:** ${{ inputs.change_details }}"
+            echo "- **Version:** \`${{ inputs.version_tag }}\`"
+            echo "- **Branch:** \`${{ env.BRANCH_NAME }}\`"
+            echo "- **Commits:** ${{ steps.check_diff.outputs.diff_count }}"
+            echo "- **PR:** ${{ steps.create_pr.outputs.pull-request-url }}"
+            echo "- **Created:** $(date)"
+            echo ""
+            echo "**🔄 Action Required: Please review and merge the PR manually**"
+            echo ""
+            echo "**[👉 Click here to review and merge PR #${{ steps.create_pr.outputs.pull-request-number }}](${{ steps.create_pr.outputs.pull-request-url }})**"
+          } >> "$GITHUB_STEP_SUMMARY"
