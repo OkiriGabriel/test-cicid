@@ -38,12 +38,26 @@ jobs:
           ref: dev
           fetch-depth: 0
 
-      # ── Step 2: Setup Git Configuration ──────────────────────────────────────
-      - name: Setup Git Configuration
+      # ── Step 2: Create Development Deployment Branch ─────────────────────────
+      - name: Create Development Deployment Branch
+        id: create_branch
         run: |
+          DATE_STR=$(date +'%b-%d-%Y_%H%M%S')
+          BRANCH_NAME="DEV-Deploy_${DATE_STR}_${{ inputs.change_details }}"
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> "$GITHUB_ENV"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          echo "Git configuration completed"
+
+          # Delete local branch if it exists
+          git branch -D "${BRANCH_NAME}" 2>/dev/null || true
+          
+          # Delete remote branch if it exists
+          git push origin --delete "${BRANCH_NAME}" 2>/dev/null || true
+
+          git checkout -b "${BRANCH_NAME}"
+          echo "Created branch: ${BRANCH_NAME}"
 
       # ── Step 3: Check for Differences Between Test and Dev ──────────────────
       - name: Check for Differences Between Test and Dev
@@ -91,13 +105,13 @@ jobs:
           echo "Workflow completed successfully - no changes to deploy."
 
       # ── Step 5: Create Pull Request from test to dev (if changes exist) ────────
-      - name: Create Pull Request from test to dev
+      - name: Create Pull Request to dev
         if: steps.check_diff.outputs.has_changes == 'true'
         id: create_pr
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          echo "Creating PR directly from test branch to dev branch..."
+          echo "Creating PR using gh CLI..."
           
           # Ensure labels exist
           echo "Creating labels if they don't exist..."
@@ -105,37 +119,30 @@ jobs:
           gh label create "deployment" --color "0075ca" --description "Deployment related" 2>/dev/null || echo "Label 'deployment' already exists"
           
           # Create PR body
-          PR_BODY="## Development Deployment - Manual Review Required
+          PR_BODY="## Development Deployment
 
           | Field        | Value |
           |---|---|
-          | **Source Branch** | \`test\` |
-          | **Target Branch** | \`dev\` |
+          | **Branch**   | \`${{ env.BRANCH_NAME }}\` |
+          | **Target**   | \`dev\` |
           | **Change Details** | \`${{ inputs.change_details }}\` |
           | **Version Tag** | \`${{ inputs.version_tag }}\` |
           | **RITM Ticket** | ${{ inputs.ritm_ticket || 'N/A' }} |
           | **Commits to Deploy** | ${{ steps.check_diff.outputs.diff_count }} |
           | **Triggered by** | @${{ github.actor }} |
 
-          ### Manual Review Required
-          - [ ] Review changes from test branch
-          - [ ] Verify deployment readiness
-          - [ ] Check for merge conflicts
-          - [ ] Stakeholder approval obtained
-          - [ ] **Manual merge required - DO NOT auto-merge**
+          ### Checklist
+          - [ ] Source branch: \`${{ env.BRANCH_NAME }}\`
+          - [ ] Destination: \`dev\`
+          - [ ] Merge conflicts resolved
+          - [ ] Stakeholders reviewed"
 
-          ### Instructions
-          1. Review all changes carefully
-          2. Resolve any merge conflicts if present  
-          3. Manually merge when ready
-          4. No automatic merging will occur"
-
-          # Create the PR with labels directly from test to dev
+          # Create the PR with labels
           PR_URL=$(gh pr create \
             --repo "${{ github.repository }}" \
             --base dev \
-            --head test \
-            --title "DEV Deploy: ${{ inputs.change_details }} - Manual Review Required" \
+            --head "${{ env.BRANCH_NAME }}" \
+            --title "DEV Deploy: ${{ env.BRANCH_NAME }}" \
             --body "$PR_BODY" \
             --label "development,deployment")
 
@@ -146,7 +153,7 @@ jobs:
           echo "pull-request-url=$PR_URL" >> "$GITHUB_OUTPUT"
           echo "pull-request-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           
-          echo "PR created successfully for manual review:"
+          echo "PR created successfully:"
           echo "URL: $PR_URL"
           echo "Number: $PR_NUMBER"
 
@@ -157,7 +164,7 @@ jobs:
         run: |
           echo "=== PR Creation Status ==="
           if [ -n "${{ steps.create_pr.outputs.pull-request-url }}" ]; then
-            echo "✓ Pull Request created successfully for manual review"
+            echo "✓ Pull Request created successfully"
             echo "  URL: ${{ steps.create_pr.outputs.pull-request-url }}"
             echo "  Number: #${{ steps.create_pr.outputs.pull-request-number }}"
           else
@@ -165,35 +172,29 @@ jobs:
             exit 1
           fi
 
-      # ── Step 6: Manual Review PR Created Summary (if changes exist) ──────────
-      - name: Manual Review PR Created Summary
+      # ── Step 8: Deployment PR Created Summary (if changes exist) ────────────
+      - name: Deployment PR Created Summary
         if: steps.check_diff.outputs.has_changes == 'true'
         run: |
           {
-            echo "## Test to Dev Deployment PR Created - Manual Review Required"
+            echo "## Test to Dev Deployment PR Created"
             echo ""
             echo "| Step | Status |"
             echo "|------|--------|"
-            echo "| Changes Detected | ✅ ${{ steps.check_diff.outputs.diff_count }} commits |"
+            echo "| Branch Created | \`${{ env.BRANCH_NAME }}\` |"
+            echo "| Test Merged | Completed (${{ steps.check_diff.outputs.diff_count }} commits) |"
             echo "| PR Created | #${{ steps.create_pr.outputs.pull-request-number }} |"
-            echo "| Source Branch | \`test\` |"
-            echo "| Target Branch | \`dev\` |"
-            echo "| **Status** | **⚠️ MANUAL REVIEW REQUIRED** |"
-            echo ""
-            echo "**🚨 IMPORTANT: No automatic merging will occur**"
+            echo "| **Next Step** | **Manual PR Review & Merge Required** |"
             echo ""
             echo "**Deployment Details:**"
             echo "- **Change:** ${{ inputs.change_details }}"
             echo "- **Version:** \`${{ inputs.version_tag }}\`"
+            echo "- **Branch:** \`${{ env.BRANCH_NAME }}\`"
             echo "- **Commits:** ${{ steps.check_diff.outputs.diff_count }}"
             echo "- **PR:** ${{ steps.create_pr.outputs.pull-request-url }}"
             echo "- **Created:** $(date)"
             echo ""
-            echo "**📋 Next Steps:**"
-            echo "1. Review the PR carefully"
-            echo "2. Check for any merge conflicts"
-            echo "3. Get stakeholder approval"
-            echo "4. **Manually merge when ready**"
+            echo "**🔄 Action Required: Please review and merge the PR manually**"
             echo ""
-            echo "**[👉 Click here to review PR #${{ steps.create_pr.outputs.pull-request-number }}](${{ steps.create_pr.outputs.pull-request-url }})**"
+            echo "**[👉 Click here to review and merge PR #${{ steps.create_pr.outputs.pull-request-number }}](${{ steps.create_pr.outputs.pull-request-url }})**"
           } >> "$GITHUB_STEP_SUMMARY"
